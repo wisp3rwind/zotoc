@@ -94,6 +94,7 @@ def outline_from_annotations(cite_key):
     zotero_db_path = data_path / "zotero.sqlite"
     con = sqlite3.connect(f'file:{zotero_db_path}?mode=ro', uri=True)
     bbt_db_path = data_path / "better-bibtex.sqlite"
+    # https://github.com/retorquere/zotero-better-bibtex/issues/2684#issuecomment-1774151488
     con.execute(f'ATTACH DATABASE "file:{bbt_db_path}?mode=ro" AS betterbibtex')
 
     cur = con.cursor()

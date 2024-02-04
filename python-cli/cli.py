@@ -5,6 +5,14 @@ __all__ = [
 ]
 
 
+# TUI libraries:
+# - https://github.com/prompt-toolkit/python-prompt-toolkit
+# - https://github.com/Textualize/textual
+# - https://github.com/rothgar/awesome-tuis?tab=readme-ov-file#libraries
+# - https://github.com/jquast/blessed
+# - https://github.com/Textualize/rich
+
+
 def select(msg, options):
     if len(options) == 0:
         raise ValueError("Empty options")
