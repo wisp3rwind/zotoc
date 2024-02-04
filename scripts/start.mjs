@@ -8,7 +8,7 @@ import path from "path";
 import { exit } from "process";
 
 const { addonID } = details.config;
-const { zoteroBinPath, profilePath, dataDir } = cmd.exec;
+const { zoteroBinCmd, profilePath, dataDir } = cmd.exec;
 
 // Keep in sync with the addon's onStartup
 const loadDevToolWhen = `Plugin ${addonID} startup`;
@@ -16,7 +16,7 @@ const loadDevToolWhen = `Plugin ${addonID} startup`;
 const logPath = "logs";
 const logFilePath = path.join(logPath, "zotero.log");
 
-if (!existsSync(zoteroBinPath)) {
+if (!existsSync(zoteroBinCmd[0])) {
   throw new Error("Zotero binary does not exist.");
 }
 
@@ -83,11 +83,12 @@ export function main(callback) {
 
   prepareLog();
 
-  const zoteroProcess = spawn(zoteroBinPath, [
+  const zoteroProcess = spawn(zoteroBinCmd[0], [
+    ...zoteroBinCmd.slice(1),
     "--debugger",
     "--purgecaches",
     "-profile",
-    profilePath,
+    profilePath
   ]);
 
   zoteroProcess.stdout.on("data", (data) => {

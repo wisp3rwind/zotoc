@@ -1,15 +1,15 @@
 {
-  "name": "zotero-addon-template",
-  "version": "1.1.1",
-  "description": "Zotero Addon Template",
+  "name": "zotoc",
+  "version": "0.1.0",
+  "description": "Add outlines to PDFs based on annotations in Zotero",
   "config": {
-    "addonName": "Zotero Addon Template",
-    "addonID": "addontemplate@euclpts.com",
-    "addonRef": "addontemplate",
-    "addonInstance": "AddonTemplate",
-    "prefsPrefix": "extensions.zotero.addontemplate",
-    "releasePage": "https://github.com/windingwind/zotero-addon-template/releases",
-    "updateJSON": "https://raw.githubusercontent.com/windingwind/zotero-addon-template/main/update.json"
+    "addonName": "Zotoc",
+    "addonID": "zotoc@wisp3rwind.github.io",
+    "addonRef": "zotoc",
+    "addonInstance": "Zotoc",
+    "prefsPrefix": "extensions.zotero.zotoc",
+    "releasePage": "https://github.com/wisp3rwind/zotoc/releases",
+    "updateJSON": "https://raw.githubusercontent.com/wisp3rwind/zotoc/main/update.json"
   },
   "main": "src/index.ts",
   "scripts": {
@@ -23,14 +23,14 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/windingwind/zotero-addon-template.git"
+    "url": "git+https://github.com/wisp3rwind/zotoc.git"
   },
-  "author": "windingwind",
+  "author": "wisp3rwind",
   "license": "AGPL-3.0-or-later",
   "bugs": {
-    "url": "https://github.com/windingwind/zotero-addon-template/issues"
+    "url": "https://github.com/wisp3rwind/zotoc/issues"
   },
-  "homepage": "https://github.com/windingwind/zotero-addon-template#readme",
+  "homepage": "https://github.com/wisp3rwind/zotoc#readme",
   "dependencies": {
     "zotero-plugin-toolkit": "^2.3.15"
   },
