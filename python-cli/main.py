@@ -1,13 +1,14 @@
 #! /usr/bin/env python3
 
+import os
 import click
 from collections import defaultdict
 from dataclasses import dataclass
 import json
 from pathlib import Path
+import re
 import shutil
 import sqlite3
-import sys
 import subprocess
 import tempfile
 
@@ -175,25 +176,96 @@ def outline_from_annotations(cite_key):
     for a in annotations:
         print(a)
 
-    # TODO: Edit outline
+    # Edit outline
+    # TODO: preview and ask whether to continue or keep editing
+    annotations = [(0, a) for a in annotations]
+    with tempfile.NamedTemporaryFile("w+", suffix=".md") as f:
+        f.writelines((
+            "=" * (level + 1) + f" {a.text}" + (f" ({a.comment})" if a.comment else "") + f" [p. {a.page}, id={id_}]\n"
+            for id_, (level, a) in enumerate(annotations)
+        ))
+        f.file.close()
+
+        editor = os.environ.get("EDITOR", "vim")
+        subprocess.run([editor, f.name])
+
+        annotations_new = []
+        with open(f.name) as fres:
+            for line in fres:
+                header_prefix, text = line.split(" ", maxsplit=1)
+
+                level = len(header_prefix) - 1
+                assert header_prefix == "=" * (level + 1)
+
+                text, meta = text.rsplit("[", maxsplit=1)
+                text = text.removesuffix(" ")
+                meta = meta.removesuffix("]")
+                id_ = None
+                for m in meta.split(","):
+                    m = m.strip()
+                    match = re.match("id=([0-9]+)", m)
+                    if match:
+                        id_ = int(match.group(1))
+                assert id_ is not None
+
+
+                # support reordering + deletion
+                _, annot = annotations[id_]
+                # Use new text, might be modified
+                annot.text = text
+                annotations_new.append((level, annot))
+
+    print(annotations_new)
+
+    outline_items = [
+        (
+            level,
+            pikepdf.OutlineItem(
+                annot.text,
+                annot.page,
+                page_location=pikepdf.PageLocation.XYZ,
+                top=annot.top + 0.5 * (annot.top - annot.bottom),
+            ),
+        )
+        for level, annot in annotations_new
+    ]
+
+    def build_outline(items, out=None, level=0):
+        if out is None:
+            out = []
+
+        while items:
+            item_level, item = items[0]
+            if item_level == level:
+                items.pop(0)
+                out.append(item)
+            elif item_level == level + 1:
+                # FIXME: handle the error case in a user-friendly way
+                children = build_outline(items, None, level + 1)
+                out[-1].children.extend(children)
+            elif item_level < level:
+                return out
+            else:
+                raise RuntimeError("invalid outline levels")
+
+        return out
+
+    outline_items = build_outline(outline_items)
+
+    print(outline_items)
+
+    input("Continue?")
 
     # Locate the attachment file
     attachment_name = attachmentPath.removeprefix("storage:")
     attachment_path = data_path / "storage" / attachment_key / attachment_name
 
     # Add outline to PDF and write to a temporary file
-    # FIXME: If outline exists, print and ask about overwriting
+    # FIXME: If outline exists, print and ask about overwriting (also, add an
+    # option to merge with new items)
     with pikepdf.open(attachment_path) as pdf:
         with pdf.open_outline() as outline:
-            outline.root.extend([
-                pikepdf.OutlineItem(
-                    annot.text,
-                    annot.page,
-                    page_location=pikepdf.PageLocation.XYZ,
-                    top=annot.top + 0.5 * (annot.top - annot.bottom),
-                )
-                for annot in annotations
-            ])
+            outline.root.extend(outline_items)
 
         with tempfile.NamedTemporaryFile(
             dir=attachment_path.parent,
