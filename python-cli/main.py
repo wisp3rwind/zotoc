@@ -5,12 +5,14 @@ import click
 from collections import defaultdict
 from dataclasses import dataclass
 import json
+import logging
 from pathlib import Path
 import re
 import shutil
 import sqlite3
 import subprocess
 import tempfile
+from typing import Any, Dict, List, Literal, Optional, Self, Sequence, Tuple, Union
 
 import pikepdf
 
@@ -22,7 +24,7 @@ from cli import *
 # -> should really write a Zotero plugin using pdf.js instead
 
 
-def list_annotations(pdf):
+def list_annotations(pdf: pikepdf.Pdf):
     all_annots = defaultdict(list)
 
     for page in pdf.pages:
@@ -53,7 +55,7 @@ def main():
 
 @main.command()
 @click.argument("path")
-def list_pdf_annotations(path):
+def list_pdf_annotations(path: Union[str, Path]):
     with pikepdf.open(path) as pdf:
         list_annotations(pdf)
 
@@ -61,8 +63,8 @@ def list_pdf_annotations(path):
 @dataclass
 class Annotation:
     text: str
-    comment: str
-    color: str
+    comment: Optional[str]
+    color: str  # HTML color
     page: int
     left: float
     bottom: float
@@ -70,8 +72,14 @@ class Annotation:
     top: float
 
     @classmethod
-    def parse(cls, text, comment, color, position):
-        position = json.loads(position)
+    def parse(
+        cls,
+        text: str,
+        comment: Optional[str],
+        color: str,
+        position_json: str,
+    ) -> Self:
+        position = json.loads(position_json)
         return cls(
             text=text,
             comment=comment,
@@ -84,20 +92,89 @@ class Annotation:
         )
 
     def position_key(self):
+        # FIXME: Add an ordering mode that tries to deal with two-column pdfs
         return self.page, -self.top, self.left
 
 
-def edit_outline(items):
+@dataclass
+class Item:
+    level: int
+    title: str
+    page: int
+    top: Optional[float]
+    left: Optional[float]
+    source: Literal["pdf", "annot"]
+    _obj: Optional[pikepdf.OutlineItem]
+
+    @classmethod
+    def from_annotation(cls, annot: Annotation, level: int = 0) -> Self:
+        title = annot.text
+        if annot.comment:
+            title = f"{title} ({annot.comment})"
+
+        return cls(
+            level=level,
+            title=title,
+            page=annot.page,
+            top=annot.top + 0.5 * (annot.top - annot.bottom),
+            left=annot.left,
+            source="annot",
+            _obj=None,
+        )
+
+    @classmethod
+    def from_pikepdf(cls, obj: pikepdf.OutlineItem, level: int = 0) -> Self:
+        # FIXME: Properly parse destination (important to get decent sorting
+        # when combining new and old outline items)
+        return cls(
+            level=level,
+            title=obj.title,
+            page=pikepdf.Page(obj.destination[0]).index,
+            top=None,
+            left=None,
+            source="pdf",
+            _obj=obj,
+        )
+
+    def update(self, level: int, title: str):
+        self.level = level
+        self.title = title
+        if self._obj:
+            self._obj.title = title
+
+    @property
+    def obj(self) -> pikepdf.OutlineItem:
+        if self._obj is None:
+            self._obj = pikepdf.OutlineItem(
+                self.title,
+                self.page,
+                page_location=pikepdf.PageLocation.XYZ,
+                top=self.top,
+            )
+        return self._obj
+
+    def position_key(self):
+        # FIXME: Add an ordering mode that tries to deal with two-column pdfs
+        return (
+            self.page,
+            (-self.top if self.top is not None else -1.0),
+            (self.left if self.left is not None else -1.0),
+        )
+
+
+def edit_outline(items: List[Item]) -> List[Item]:
     items_orig = items[:]
 
     while True:
         with tempfile.NamedTemporaryFile("w+", suffix=".md") as f:
             f.writelines((
-                "=" * (level + 1) + f" {a.text}" + (f" ({a.comment})" if a.comment else "") + f" [p. {a.page}, id={id_}]\n"
-                for id_, (level, a) in enumerate(items)
+                "=" * (item.level + 1) + f" {item.title}  [p. {item.page}, {item.source}, id={id_}]\n"
+                for id_, item in enumerate(items)
             ))
             f.file.close()
 
+            # FIXME: Check whether executable, otherwise have some fallback
+            # options (nano, xdg-open)
             editor = os.environ.get("EDITOR", "vim")
             subprocess.run([editor, f.name])
 
@@ -109,8 +186,8 @@ def edit_outline(items):
                     level = len(header_prefix) - 1
                     assert header_prefix == "=" * (level + 1)
 
-                    text, meta = text.rsplit("[", maxsplit=1)
-                    text = text.removesuffix(" ")
+                    title, meta = text.rsplit("[", maxsplit=1)
+                    title = title.removesuffix(" ")
                     meta = meta.removesuffix("]")
                     id_ = None
                     for m in meta.split(","):
@@ -121,37 +198,39 @@ def edit_outline(items):
                     assert id_ is not None
 
 
-                    # support reordering + deletion
-                    _, annot = items_orig[id_]
-                    # Use new text and level, might be modified
-                    annot.text = text
-                    items.append((level, annot))
+                    # support reordering + deletion by building a new list here
+                    item = items_orig[id_]
+                    # Use new title and level, might be modified
+                    item.update(level=level, title=title)
+                    items.append(item)
 
-        for level, annot in items:
-            print("\t" * level + annot.text)
+        print_outline(items)
+
+        # FIXME: Validate outline nesting here (to avoid late failure in
+        # build_pikepdf_outline)
 
         if not ask_yn("Keep editing?"):
             return items
 
 
-def build_pikepdf_outline(items, out=None, level=0):
+def build_pikepdf_outline(items: List[Item], out=None, level=0) -> List[pikepdf.OutlineItem]:
     if out is None:
         out = []
 
     while items:
-        item_level, item = items[0]
-        if item_level == level:
+        item = items[0]
+        if item.level == level:
             # Append items at the current level
             items.pop(0)
-            out.append(item)
-        elif item_level == level + 1:
+            out.append(item.obj)
+        elif item.level == level + 1:
             # Higher nesting, recurse
-            children = build_outline(items, None, level + 1)
+            children = build_pikepdf_outline(items, None, level + 1)
             out[-1].children.extend(children)
-        elif item_level < level:
+        elif item.level < level:
             # Back to lower nesting
             return out
-        else:  # item_level >= level + 2
+        else:  # item.level >= level + 2
             # Skipped a level
             # FIXME: handle the error case in a user-friendly way
             raise RuntimeError("invalid outline levels")
@@ -159,7 +238,7 @@ def build_pikepdf_outline(items, out=None, level=0):
     return out
 
 
-def fetch_zotero_data(cite_key):
+def fetch_zotero_data(cite_key: str) -> Tuple[List[Annotation], Path]:
     data_path = Path("~/Zotero").expanduser()
 
     zotero_db_path = data_path / "zotero.sqlite"
@@ -234,9 +313,42 @@ def fetch_zotero_data(cite_key):
     return annotations, attachment_path
 
 
+def print_pikepdf_outline(items: List[pikepdf.OutlineItem], level: int = 0):
+    if level == 0:
+        print("=" * 40)
+
+    for item in items:
+        print("\t" * level + f"{item.title} [p. {pikepdf.Page(item.destination[0]).index} ({item.destination[1]})]")
+        print_pikepdf_outline(item.children, level + 1)
+
+    if level == 0:
+        print("=" * 40)
+
+
+def print_outline(items: Sequence[Item], level: int = 0):
+    if level == 0:
+        print("=" * 40)
+
+    for item in items:
+        print("\t" * item.level + f"{item.title} [p. {item.page}]")
+
+    if level == 0:
+        print("=" * 40)
+
+
+def parse_pikepdf_outline(items: Sequence[pikepdf.OutlineItem], level: int = 0) -> List[Item]:
+    result = []
+
+    for item in items:
+        result.append(Item.from_pikepdf(item, level=level))
+        result.extend(parse_pikepdf_outline(item.children, level=level + 1))
+        
+    return result
+
+
 @main.command()
 @click.argument("cite-key")
-def outline_from_annotations(cite_key):
+def outline_from_annotations(cite_key: str):
     annotations, attachment_path = fetch_zotero_data(cite_key)
     annotations = sorted(annotations, key=Annotation.position_key)
 
@@ -253,39 +365,33 @@ def outline_from_annotations(cite_key):
         options.append(opt)
 
     color_idx, _ = select("Choose annotation color", options)
-    
     annotations = annotations_by_color[list(annotations_by_color.keys())[color_idx]]
-    for a in annotations:
-        print(a)
 
-    # Edit outline
-    annotations = [(0, a) for a in annotations]
-    annotations_new = edit_outline(annotations)
+    items = [Item.from_annotation(a) for a in annotations]
 
-    outline_items = [
-        (
-            level,
-            pikepdf.OutlineItem(
-                annot.text,
-                annot.page,
-                page_location=pikepdf.PageLocation.XYZ,
-                top=annot.top + 0.5 * (annot.top - annot.bottom),
-            ),
-        )
-        for level, annot in annotations_new
-    ]
-
-    outline_items = build_pikepdf_outline(outline_items)
-
-    print(outline_items)
-
-    input("Continue?")
-
-    # Add outline to PDF and write to a temporary file
-    # FIXME: If outline exists, print and ask about overwriting (also, add an
-    # option to merge with new items)
     with pikepdf.open(attachment_path) as pdf:
         with pdf.open_outline() as outline:
+            if outline.root:
+                print("Attachment already contains an outline:")
+                print_pikepdf_outline(outline.root)
+                clear_outline = not ask_yn("Keep these entries?")
+                if not clear_outline:
+                    items.extend(parse_pikepdf_outline(outline.root))
+                    items = sorted(items, key=Item.position_key)
+            else:
+                clear_outline = False
+
+    items = edit_outline(items)
+
+    # Convert flat `Item` list into `OutlineItem` tree
+    outline_items = build_pikepdf_outline(items)
+    logging.debug(outline_items)
+
+    # Add outline to PDF and write to a temporary file
+    with pikepdf.open(attachment_path) as pdf:
+        with pdf.open_outline() as outline:
+            if clear_outline:
+                outline.root.clear()
             outline.root.extend(outline_items)
 
         with tempfile.NamedTemporaryFile(
