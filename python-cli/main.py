@@ -87,9 +87,79 @@ class Annotation:
         return self.page, -self.top, self.left
 
 
-@main.command()
-@click.argument("cite-key")
-def outline_from_annotations(cite_key):
+def edit_outline(items):
+    items_orig = items[:]
+
+    while True:
+        with tempfile.NamedTemporaryFile("w+", suffix=".md") as f:
+            f.writelines((
+                "=" * (level + 1) + f" {a.text}" + (f" ({a.comment})" if a.comment else "") + f" [p. {a.page}, id={id_}]\n"
+                for id_, (level, a) in enumerate(items)
+            ))
+            f.file.close()
+
+            editor = os.environ.get("EDITOR", "vim")
+            subprocess.run([editor, f.name])
+
+            items = []
+            with open(f.name) as fres:
+                for line in fres:
+                    header_prefix, text = line.split(" ", maxsplit=1)
+
+                    level = len(header_prefix) - 1
+                    assert header_prefix == "=" * (level + 1)
+
+                    text, meta = text.rsplit("[", maxsplit=1)
+                    text = text.removesuffix(" ")
+                    meta = meta.removesuffix("]")
+                    id_ = None
+                    for m in meta.split(","):
+                        m = m.strip()
+                        match = re.match("id=([0-9]+)", m)
+                        if match:
+                            id_ = int(match.group(1))
+                    assert id_ is not None
+
+
+                    # support reordering + deletion
+                    _, annot = items_orig[id_]
+                    # Use new text and level, might be modified
+                    annot.text = text
+                    items.append((level, annot))
+
+        for level, annot in items:
+            print("\t" * level + annot.text)
+
+        if not ask_yn("Keep editing?"):
+            return items
+
+
+def build_pikepdf_outline(items, out=None, level=0):
+    if out is None:
+        out = []
+
+    while items:
+        item_level, item = items[0]
+        if item_level == level:
+            # Append items at the current level
+            items.pop(0)
+            out.append(item)
+        elif item_level == level + 1:
+            # Higher nesting, recurse
+            children = build_outline(items, None, level + 1)
+            out[-1].children.extend(children)
+        elif item_level < level:
+            # Back to lower nesting
+            return out
+        else:  # item_level >= level + 2
+            # Skipped a level
+            # FIXME: handle the error case in a user-friendly way
+            raise RuntimeError("invalid outline levels")
+
+    return out
+
+
+def fetch_zotero_data(cite_key):
     data_path = Path("~/Zotero").expanduser()
 
     zotero_db_path = data_path / "zotero.sqlite"
@@ -156,6 +226,18 @@ def outline_from_annotations(cite_key):
     ).fetchall()
 
     annotations = [Annotation.parse(*a) for a in annotations]
+
+    # Locate the attachment file
+    attachment_name = attachmentPath.removeprefix("storage:")
+    attachment_path = data_path / "storage" / attachment_key / attachment_name
+
+    return annotations, attachment_path
+
+
+@main.command()
+@click.argument("cite-key")
+def outline_from_annotations(cite_key):
+    annotations, attachment_path = fetch_zotero_data(cite_key)
     annotations = sorted(annotations, key=Annotation.position_key)
 
     # Ask user to select annotations for a specific color
@@ -177,45 +259,8 @@ def outline_from_annotations(cite_key):
         print(a)
 
     # Edit outline
-    # TODO: preview and ask whether to continue or keep editing
     annotations = [(0, a) for a in annotations]
-    with tempfile.NamedTemporaryFile("w+", suffix=".md") as f:
-        f.writelines((
-            "=" * (level + 1) + f" {a.text}" + (f" ({a.comment})" if a.comment else "") + f" [p. {a.page}, id={id_}]\n"
-            for id_, (level, a) in enumerate(annotations)
-        ))
-        f.file.close()
-
-        editor = os.environ.get("EDITOR", "vim")
-        subprocess.run([editor, f.name])
-
-        annotations_new = []
-        with open(f.name) as fres:
-            for line in fres:
-                header_prefix, text = line.split(" ", maxsplit=1)
-
-                level = len(header_prefix) - 1
-                assert header_prefix == "=" * (level + 1)
-
-                text, meta = text.rsplit("[", maxsplit=1)
-                text = text.removesuffix(" ")
-                meta = meta.removesuffix("]")
-                id_ = None
-                for m in meta.split(","):
-                    m = m.strip()
-                    match = re.match("id=([0-9]+)", m)
-                    if match:
-                        id_ = int(match.group(1))
-                assert id_ is not None
-
-
-                # support reordering + deletion
-                _, annot = annotations[id_]
-                # Use new text, might be modified
-                annot.text = text
-                annotations_new.append((level, annot))
-
-    print(annotations_new)
+    annotations_new = edit_outline(annotations)
 
     outline_items = [
         (
@@ -230,35 +275,11 @@ def outline_from_annotations(cite_key):
         for level, annot in annotations_new
     ]
 
-    def build_outline(items, out=None, level=0):
-        if out is None:
-            out = []
-
-        while items:
-            item_level, item = items[0]
-            if item_level == level:
-                items.pop(0)
-                out.append(item)
-            elif item_level == level + 1:
-                # FIXME: handle the error case in a user-friendly way
-                children = build_outline(items, None, level + 1)
-                out[-1].children.extend(children)
-            elif item_level < level:
-                return out
-            else:
-                raise RuntimeError("invalid outline levels")
-
-        return out
-
-    outline_items = build_outline(outline_items)
+    outline_items = build_pikepdf_outline(outline_items)
 
     print(outline_items)
 
     input("Continue?")
-
-    # Locate the attachment file
-    attachment_name = attachmentPath.removeprefix("storage:")
-    attachment_path = data_path / "storage" / attachment_key / attachment_name
 
     # Add outline to PDF and write to a temporary file
     # FIXME: If outline exists, print and ask about overwriting (also, add an
