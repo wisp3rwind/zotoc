@@ -12,11 +12,11 @@ import shutil
 import sqlite3
 import subprocess
 import tempfile
-from typing import Any, Dict, List, Literal, Optional, Self, Sequence, Tuple, Union
+from typing import List, Literal, Optional, Self, Sequence, Tuple, Union
 
 import pikepdf
 
-from cli import *
+from cli import ask_yn, html_color_block, select
 
 
 # Problem: Zotero annotations are not stored to PDF (which is a good thing!),
