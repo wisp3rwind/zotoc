@@ -48,9 +48,10 @@ def html_color_block(color, size=5):
 
 def ask_yn(msg):
     while True:
-        answer = input(msg)
+        answer = input(msg + " [y/n]")
         answer = answer.strip().lower()
         if answer in ["y", "yes"]:
             return True
         elif answer in ["n", "no"]:
             return False
+        print("Please enter y[es] or n[o]!")
