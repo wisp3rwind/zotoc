@@ -20,11 +20,6 @@ import pikepdf
 from cli import ask_yn, html_color_block, select
 
 
-# Problem: Zotero annotations are not stored to PDF (which is a good thing!),
-# so this can't work without exporting the PDF; which is annoying.
-# -> should really write a Zotero plugin using pdf.js instead
-
-
 def list_annotations(pdf: pikepdf.Pdf) -> None:
     all_annots = defaultdict(list)
 
