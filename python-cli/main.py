@@ -318,7 +318,11 @@ def print_pikepdf_outline(items: List[pikepdf.OutlineItem], level: int = 0):
         print("=" * 40)
 
     for item in items:
-        print("\t" * level + f"{item.title} [p. {pikepdf.Page(item.destination[0]).index} ({item.destination[1]})]")
+        if item.destination is not None:
+            print("\t" * level + f"{item.title} [p. {pikepdf.Page(item.destination[0]).index} ({item.destination[1]})]")
+        else:
+            print("\t" * level + f"{item.title} [action]")
+
         print_pikepdf_outline(item.children, level + 1)
 
     if level == 0:
