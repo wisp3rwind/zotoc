@@ -187,7 +187,7 @@ def edit_outline(items: List[Item]) -> List[Item]:
                     assert header_prefix == "=" * (level + 1)
 
                     title, meta = text.rsplit("[", maxsplit=1)
-                    title = title.removesuffix(" ")
+                    title = title.strip()
                     meta = meta.removesuffix("]")
                     id_ = None
                     for m in meta.split(","):
