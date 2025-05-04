@@ -3,6 +3,7 @@
 import os
 import click
 from collections import defaultdict
+from collections.abc import Sequence
 from dataclasses import dataclass
 import json
 import logging
@@ -12,7 +13,7 @@ import shutil
 import sqlite3
 import subprocess
 import tempfile
-from typing import List, Literal, Optional, Self, Sequence, Tuple, Union
+from typing import Literal, Self, Union
 
 import pikepdf
 
@@ -24,7 +25,7 @@ from cli import ask_yn, html_color_block, select
 # -> should really write a Zotero plugin using pdf.js instead
 
 
-def list_annotations(pdf: pikepdf.Pdf):
+def list_annotations(pdf: pikepdf.Pdf) -> None:
     all_annots = defaultdict(list)
 
     for page in pdf.pages:
@@ -49,13 +50,13 @@ def list_annotations(pdf: pikepdf.Pdf):
 
 
 @click.group()
-def main():
+def main() -> None:
     pass
 
 
 @main.command()
 @click.argument("path")
-def list_pdf_annotations(path: Union[str, Path]):
+def list_pdf_annotations(path: Union[str, Path]) -> None:
     with pikepdf.open(path) as pdf:
         list_annotations(pdf)
 
@@ -63,7 +64,7 @@ def list_pdf_annotations(path: Union[str, Path]):
 @dataclass
 class Annotation:
     text: str
-    comment: Optional[str]
+    comment: str | None
     color: str  # HTML color
     page: int
     left: float
@@ -75,7 +76,7 @@ class Annotation:
     def parse(
         cls,
         text: str,
-        comment: Optional[str],
+        comment: str | None,
         color: str,
         position_json: str,
     ) -> Self:
@@ -91,7 +92,7 @@ class Annotation:
             top=position["rects"][0][3],
         )
 
-    def position_key(self):
+    def position_key(self) -> tuple[int, float, float]:
         # FIXME: Add an ordering mode that tries to deal with two-column pdfs
         return self.page, -self.top, self.left
 
@@ -101,10 +102,10 @@ class Item:
     level: int
     title: str
     page: int
-    top: Optional[float]
-    left: Optional[float]
+    top: float | None
+    left: float | None
     source: Literal["pdf", "annot"]
-    _obj: Optional[pikepdf.OutlineItem]
+    _obj: pikepdf.OutlineItem | None
 
     @classmethod
     def from_annotation(cls, annot: Annotation, level: int = 0) -> Self:
@@ -136,7 +137,7 @@ class Item:
             _obj=obj,
         )
 
-    def update(self, level: int, title: str):
+    def update(self, level: int, title: str) -> None:
         self.level = level
         self.title = title
         if self._obj:
@@ -153,7 +154,7 @@ class Item:
             )
         return self._obj
 
-    def position_key(self):
+    def position_key(self) -> tuple[int, float, float]:
         # FIXME: Add an ordering mode that tries to deal with two-column pdfs
         return (
             self.page,
@@ -162,7 +163,7 @@ class Item:
         )
 
 
-def edit_outline(items: List[Item]) -> List[Item]:
+def edit_outline(items: list[Item]) -> list[Item]:
     items_orig = items[:]
 
     while True:
@@ -213,7 +214,7 @@ def edit_outline(items: List[Item]) -> List[Item]:
             return items
 
 
-def build_pikepdf_outline(items: List[Item], out=None, level=0) -> List[pikepdf.OutlineItem]:
+def build_pikepdf_outline(items: list[Item], out=None, level=0) -> list[pikepdf.OutlineItem]:
     if out is None:
         out = []
 
@@ -238,7 +239,7 @@ def build_pikepdf_outline(items: List[Item], out=None, level=0) -> List[pikepdf.
     return out
 
 
-def fetch_zotero_data(cite_key: str) -> Tuple[List[Annotation], Path]:
+def fetch_zotero_data(cite_key: str) -> tuple[list[Annotation], Path]:
     data_path = Path("~/Zotero").expanduser()
 
     zotero_db_path = data_path / "zotero.sqlite"
@@ -313,7 +314,7 @@ def fetch_zotero_data(cite_key: str) -> Tuple[List[Annotation], Path]:
     return annotations, attachment_path
 
 
-def print_pikepdf_outline(items: List[pikepdf.OutlineItem], level: int = 0):
+def print_pikepdf_outline(items: list[pikepdf.OutlineItem], level: int = 0) -> None:
     if level == 0:
         print("=" * 40)
 
@@ -329,7 +330,7 @@ def print_pikepdf_outline(items: List[pikepdf.OutlineItem], level: int = 0):
         print("=" * 40)
 
 
-def print_outline(items: Sequence[Item], level: int = 0):
+def print_outline(items: Sequence[Item], level: int = 0) -> None:
     if level == 0:
         print("=" * 40)
 
@@ -340,7 +341,7 @@ def print_outline(items: Sequence[Item], level: int = 0):
         print("=" * 40)
 
 
-def parse_pikepdf_outline(items: Sequence[pikepdf.OutlineItem], level: int = 0) -> List[Item]:
+def parse_pikepdf_outline(items: Sequence[pikepdf.OutlineItem], level: int = 0) -> list[Item]:
     result = []
 
     for item in items:
@@ -352,7 +353,7 @@ def parse_pikepdf_outline(items: Sequence[pikepdf.OutlineItem], level: int = 0) 
 
 @main.command()
 @click.argument("cite-key")
-def outline_from_annotations(cite_key: str):
+def outline_from_annotations(cite_key: str) -> None:
     annotations, attachment_path = fetch_zotero_data(cite_key)
     annotations = sorted(annotations, key=Annotation.position_key)
 
@@ -419,7 +420,6 @@ def outline_from_annotations(cite_key: str):
                     subprocess.run(["trash-put", bak_path])
                 except Exception:
                     pass
-
 
 
 if __name__ == "__main__":

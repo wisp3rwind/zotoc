@@ -1,3 +1,6 @@
+from collections.abc import Sequence
+from typing import TypeVar
+
 __all__ = [
     "ask_yn",
     "html_color_block",
@@ -13,7 +16,10 @@ __all__ = [
 # - https://github.com/Textualize/rich
 
 
-def select(msg, options):
+T = TypeVar("T")
+
+
+def select(msg: str, options: Sequence[T]) -> tuple[int, T]:
     if len(options) == 0:
         raise ValueError("Empty options")
 
@@ -34,7 +40,7 @@ def select(msg, options):
     return idx, opt
 
 
-def html_color_block(color, size=5):
+def html_color_block(color: str, size: int = 5) -> str:
     """
     """
     c = color.removeprefix("#")
@@ -46,7 +52,7 @@ def html_color_block(color, size=5):
     return set_fg + "█" * size + reset
 
 
-def ask_yn(msg):
+def ask_yn(msg: str) -> bool:
     while True:
         answer = input(msg + " [y/n]")
         answer = answer.strip().lower()
